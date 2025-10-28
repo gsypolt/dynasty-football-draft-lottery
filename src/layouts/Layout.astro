@@ -1,0 +1,56 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content="Fantasy Football Draft Lottery" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <title>{title}</title>
+  </head>
+  <body class="bg-black text-gray-100 min-h-screen">
+    <nav class="bg-gray-900 border-b border-gray-800">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-2xl font-bold text-zinc-300">Fantasy Football Draft Lottery</h1>
+          </div>
+          <div class="flex space-x-4">
+            <a
+              href="/"
+              class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition-colors"
+            >
+              Live Lottery
+            </a>
+            <a
+              href="/config"
+              class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition-colors"
+            >
+              Configuration
+            </a>
+            <a
+              href="/history"
+              class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition-colors"
+            >
+              History
+            </a>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
