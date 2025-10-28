@@ -1,0 +1,521 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Live Draft Lottery">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Header -->
+    <div class="mb-8 text-center">
+      <h2 class="text-4xl font-bold text-amber-500 mb-2">Live Draft Lottery</h2>
+      <p class="text-gray-400" id="lottery-year"></p>
+    </div>
+
+    <!-- Initial Order Setup -->
+    <div id="setup-panel" class="bg-gray-900 rounded-lg p-6 border border-gray-800 mb-8">
+      <div class="flex justify-between items-start mb-4">
+        <div>
+          <h3 class="text-2xl font-semibold text-amber-400">Set Initial Draft Order</h3>
+          <p class="text-gray-400 mt-2">Drag and drop teams to set the initial draft order (Position 10 = Worst Team)</p>
+        </div>
+        <div id="order-status" class="text-sm text-gray-500">
+          <!-- Status will be shown here -->
+        </div>
+      </div>
+      <div id="initial-order-list" class="space-y-2 mb-6">
+        <!-- Teams will be populated here -->
+      </div>
+      <div class="flex gap-4">
+        <button
+          id="save-order-btn"
+          class="px-6 py-3 bg-sky-600 hover:bg-sky-700 text-white font-medium rounded-md transition-colors"
+        >
+          Save Draft Order
+        </button>
+        <button
+          id="start-lottery-btn"
+          class="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md transition-colors"
+        >
+          Start Lottery
+        </button>
+      </div>
+    </div>
+
+    <!-- Lottery Display -->
+    <div id="lottery-panel" class="hidden">
+      <!-- Round Header -->
+      <div class="mb-6 text-center">
+        <h3 class="text-3xl font-bold text-amber-400" id="round-title">Round 1</h3>
+      </div>
+
+      <!-- Draft Board -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8" id="draft-board">
+        <!-- Picks will be displayed here -->
+      </div>
+
+      <!-- Controls -->
+      <div class="flex justify-center gap-4">
+        <button
+          id="manual-pick-btn"
+          class="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Reveal Next Pick
+        </button>
+        <button
+          id="simulate-btn"
+          class="px-6 py-3 bg-sky-600 hover:bg-sky-700 text-white font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Simulate Remaining Picks
+        </button>
+        <button
+          id="save-lottery-btn"
+          class="hidden px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md transition-colors"
+        >
+          Save Lottery Results
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    import { runCompleteLottery } from '../lib/lottery';
+    import type { DraftConfig, DraftPick } from '../types';
+
+    let config: DraftConfig;
+    let initialOrder: number[] = [];
+    let allPicks: DraftPick[] = [];
+    let currentRound = 1;
+    let currentPickIndex = 0;
+    let revealedPicks = 0;
+    let isSimulating = false;
+
+    // Load configuration
+    async function loadConfig() {
+      const response = await fetch('/api/config');
+      config = await response.json();
+
+      // Set year
+      const yearEl = document.getElementById('lottery-year');
+      if (yearEl) {
+        yearEl.textContent = `Year ${config.currentYear}`;
+      }
+
+      // Populate initial order
+      populateInitialOrder();
+    }
+
+    // Populate initial order list
+    function populateInitialOrder() {
+      const list = document.getElementById('initial-order-list');
+      if (!list) return;
+
+      list.innerHTML = '';
+
+      // Use saved initial order if available, otherwise use default (1-10)
+      const savedOrder = config.initialOrder || Array.from({ length: config.numberOfTeams }, (_, i) => i + 1);
+
+      // Update status indicator
+      updateOrderStatus(!!config.initialOrder);
+
+      // Display positions 10 to 1 from top to bottom
+      // savedOrder[0] = team at position 1, savedOrder[9] = team at position 10
+      // We need to iterate backwards to show position 10 first
+      for (let positionIndex = config.numberOfTeams - 1; positionIndex >= 0; positionIndex--) {
+        // positionIndex 9 = position 10 (first item, top of list)
+        // positionIndex 0 = position 1 (last item, bottom of list)
+        const actualPosition = positionIndex + 1; // Convert to 1-based position
+        const teamNumber = savedOrder[positionIndex]; // Which team is at this position
+        const team = config.teams[teamNumber - 1]; // Get team data
+
+        const div = document.createElement('div');
+        div.className =
+          'flex items-center gap-4 p-4 bg-gray-800 border border-gray-700 rounded-md cursor-move';
+        div.draggable = true;
+        div.dataset.position = teamNumber.toString(); // Store team number, not position
+
+        const displayPosition = actualPosition; // Display the actual position (10 at top, 1 at bottom)
+
+        // Determine logo display
+        const logoHtml = team.logoUrl
+          ? `<img src="${team.logoUrl}" alt="${team.name}" class="w-48 h-16 object-cover rounded border border-gray-600" />`
+          : `<div class="w-16 h-16 bg-gray-700 rounded border border-gray-600 flex items-center justify-center text-xl font-bold text-gray-400">${team.name.substring(0, 2).toUpperCase()}</div>`;
+
+        div.innerHTML = `
+          <div class="text-2xl font-bold text-amber-400 w-12 text-center">${displayPosition}</div>
+          ${logoHtml}
+          <div class="flex-1 ml-4">
+            <div class="font-semibold text-lg">${team.name}</div>
+            <div class="text-sm text-gray-400">Position ${displayPosition} ${displayPosition === config.numberOfTeams ? '(Worst Team)' : displayPosition === 1 ? '(Champion)' : ''}</div>
+          </div>
+        `;
+
+        // Drag events
+        div.addEventListener('dragstart', handleDragStart);
+        div.addEventListener('dragover', handleDragOver);
+        div.addEventListener('drop', handleDrop);
+        div.addEventListener('dragend', handleDragEnd);
+
+        list.appendChild(div);
+      }
+    }
+
+    let draggedElement: HTMLElement | null = null;
+
+    function handleDragStart(e: DragEvent) {
+      draggedElement = e.currentTarget as HTMLElement;
+      draggedElement.classList.add('opacity-50');
+    }
+
+    function handleDragOver(e: DragEvent) {
+      e.preventDefault();
+      return false;
+    }
+
+    function handleDrop(e: DragEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const target = e.currentTarget as HTMLElement;
+      if (draggedElement && draggedElement !== target) {
+        const list = document.getElementById('initial-order-list');
+        if (list) {
+          const children = Array.from(list.children);
+          const draggedIndex = children.indexOf(draggedElement);
+          const targetIndex = children.indexOf(target);
+
+          if (draggedIndex < targetIndex) {
+            target.after(draggedElement);
+          } else {
+            target.before(draggedElement);
+          }
+
+          updatePositionNumbers();
+        }
+      }
+
+      return false;
+    }
+
+    function handleDragEnd(e: DragEvent) {
+      if (draggedElement) {
+        draggedElement.classList.remove('opacity-50');
+      }
+    }
+
+    function updatePositionNumbers() {
+      const list = document.getElementById('initial-order-list');
+      if (!list) return;
+
+      const items = list.querySelectorAll('[data-position]');
+      // Display positions 10-1 from top to bottom (index 0 = position 10)
+      items.forEach((item, index) => {
+        const displayPosition = config.numberOfTeams - index;
+        // Don't change data-position - it stores which team this is
+        // Only update the visual display
+        const positionEl = item.querySelector('.text-amber-400');
+        if (positionEl) {
+          positionEl.textContent = displayPosition.toString();
+        }
+        const descEl = item.querySelector('.text-gray-400');
+        if (descEl) {
+          descEl.textContent = `Position ${displayPosition} ${displayPosition === config.numberOfTeams ? '(Worst Team)' : displayPosition === 1 ? '(Champion)' : ''}`;
+        }
+      });
+    }
+
+    // Update order status indicator
+    function updateOrderStatus(hasSavedOrder: boolean) {
+      const statusEl = document.getElementById('order-status');
+      if (!statusEl) return;
+
+      if (hasSavedOrder) {
+        statusEl.innerHTML = '<span class="text-green-400">✓ Saved order loaded</span>';
+      } else {
+        statusEl.innerHTML = '<span class="text-yellow-400">⚠ Using default order</span>';
+      }
+    }
+
+    // Save initial order
+    async function saveInitialOrder() {
+      // Get current order from UI
+      const list = document.getElementById('initial-order-list');
+      if (!list) return;
+
+      const items = list.querySelectorAll('[data-position]');
+      // Items are in visual order (top to bottom = position 10 to 1)
+      // We need to reverse to get position 1 to 10
+      const teamsInVisualOrder = Array.from(items).map((item) =>
+        parseInt((item as HTMLElement).dataset.position || '1')
+      );
+
+      // Reverse to get position 1 at index 0, position 10 at index 9
+      const currentOrder = teamsInVisualOrder.reverse();
+
+      // Update config with initial order
+      config.initialOrder = currentOrder;
+
+      // Save to database
+      try {
+        const response = await fetch('/api/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(config),
+        });
+
+        if (response.ok) {
+          updateOrderStatus(true);
+          showNotification('Initial order saved successfully!', 'success');
+        } else {
+          showNotification('Failed to save initial order', 'error');
+        }
+      } catch (error) {
+        showNotification('Failed to save initial order', 'error');
+      }
+    }
+
+    // Show notification
+    function showNotification(message: string, type: 'success' | 'error') {
+      // Create notification element if it doesn't exist
+      let notification = document.getElementById('lottery-notification');
+      if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'lottery-notification';
+        notification.className = 'fixed bottom-4 right-4 px-6 py-3 rounded-md shadow-lg transition-opacity';
+        document.body.appendChild(notification);
+      }
+
+      notification.textContent = message;
+      notification.className = `fixed bottom-4 right-4 px-6 py-3 rounded-md shadow-lg ${
+        type === 'success' ? 'bg-green-600' : 'bg-red-600'
+      } text-white`;
+      notification.classList.remove('hidden');
+
+      setTimeout(() => {
+        notification?.classList.add('hidden');
+      }, 3000);
+    }
+
+    // Start lottery
+    function startLottery() {
+      // Get initial order from UI
+      const list = document.getElementById('initial-order-list');
+      if (!list) return;
+
+      const items = list.querySelectorAll('[data-position]');
+      initialOrder = Array.from(items).map((item) =>
+        parseInt((item as HTMLElement).dataset.position || '1')
+      );
+
+      // Run lottery algorithm
+      allPicks = runCompleteLottery(config, initialOrder);
+
+      // Show lottery panel
+      document.getElementById('setup-panel')?.classList.add('hidden');
+      document.getElementById('lottery-panel')?.classList.remove('hidden');
+
+      // Initialize draft board
+      initializeDraftBoard();
+    }
+
+    // Initialize draft board
+    function initializeDraftBoard() {
+      const board = document.getElementById('draft-board');
+      if (!board) return;
+
+      board.innerHTML = '';
+
+      // Get picks for current round
+      const roundPicks = allPicks.filter((pick) => pick.round === currentRound);
+
+      roundPicks.forEach((pick, index) => {
+        const div = document.createElement('div');
+        div.className =
+          'relative aspect-square bg-gray-900 border border-gray-800 rounded-lg overflow-hidden';
+        div.dataset.pickIndex = index.toString();
+
+        // Card back (hidden initially)
+        const team = getTeamById(pick.teamId);
+        div.innerHTML = `
+          <div class="card-back absolute inset-0 flex flex-col items-center justify-center p-4">
+            <div class="text-6xl mb-2">?</div>
+            <div class="text-sm text-gray-400">Pick ${pick.pickNumber}</div>
+          </div>
+          <div class="card-front absolute inset-0 flex flex-col items-center justify-center p-4 opacity-0 pointer-events-none">
+            ${
+              team?.logoUrl
+                ? `<img src="${team.logoUrl}" alt="${team.name}" class="w-40 h-16 object-cover rounded border border-gray-600 mb-2" />`
+                : `<div class="w-20 h-20 mb-2 bg-gray-700 rounded-full flex items-center justify-center text-3xl">
+                     ${team?.name.substring(0, 2).toUpperCase()}
+                   </div>`
+            }
+            <div class="font-medium text-center">${team?.name}</div>
+            <div class="text-xl font-extrabold text-stone-50 mt-2">Pick ${pick.pickNumber}</div>
+            <div class="mt-2 ${getMovementColor(pick.movement)}">
+              ${getMovementText(pick.movement)}
+            </div>
+          </div>
+        `;
+
+        board.appendChild(div);
+      });
+    }
+
+    // Get team by ID
+    function getTeamById(id: string) {
+      return config.teams.find((team) => team.id === id);
+    }
+
+    // Get movement text
+    function getMovementText(movement: number): string {
+      if (movement === 0) return 'Stayed';
+      if (movement < 0) return `↑ ${Math.abs(movement)} ${Math.abs(movement) === 1 ? 'spot' : 'spots'}`;
+      return `↓ ${movement} ${movement === 1 ? 'spot' : 'spots'}`;
+    }
+
+    // Get movement color
+    function getMovementColor(movement: number): string {
+      if (movement === 0) return 'text-gray-400';
+      if (movement < 0) return 'text-green-400 font-semibold';
+      return 'text-red-400 font-semibold';
+    }
+
+    // Reveal pick with animation
+    async function revealPick(index: number) {
+      const board = document.getElementById('draft-board');
+      if (!board) return;
+
+      const card = board.querySelector(`[data-pick-index="${index}"]`);
+      if (!card) return;
+
+      const cardBack = card.querySelector('.card-back') as HTMLElement;
+      const cardFront = card.querySelector('.card-front') as HTMLElement;
+
+      // Flip animation
+      cardBack.style.transition = 'opacity 0.3s';
+      cardFront.style.transition = 'opacity 0.3s';
+
+      cardBack.style.opacity = '0';
+      setTimeout(() => {
+        cardFront.classList.remove('opacity-0', 'pointer-events-none');
+        cardFront.style.opacity = '1';
+      }, 300);
+
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+
+    // Manual pick
+    async function manualPick() {
+      if (revealedPicks >= config.numberOfTeams) return;
+
+      await revealPick(revealedPicks);
+      revealedPicks++;
+
+      if (revealedPicks >= config.numberOfTeams) {
+        onRoundComplete();
+      }
+    }
+
+    // Simulate picks
+    async function simulatePicks() {
+      if (isSimulating) return;
+
+      isSimulating = true;
+      const manualBtn = document.getElementById('manual-pick-btn') as HTMLButtonElement;
+      const simulateBtn = document.getElementById('simulate-btn') as HTMLButtonElement;
+
+      if (manualBtn) manualBtn.disabled = true;
+      if (simulateBtn) simulateBtn.disabled = true;
+
+      while (revealedPicks < config.numberOfTeams) {
+        await revealPick(revealedPicks);
+        revealedPicks++;
+        await new Promise((resolve) => setTimeout(resolve, config.pickDelaySeconds * 1000));
+      }
+
+      isSimulating = false;
+      onRoundComplete();
+    }
+
+    // Round complete
+    function onRoundComplete() {
+      const manualBtn = document.getElementById('manual-pick-btn') as HTMLButtonElement;
+      const simulateBtn = document.getElementById('simulate-btn') as HTMLButtonElement;
+
+      if (manualBtn) manualBtn.disabled = true;
+      if (simulateBtn) simulateBtn.disabled = true;
+
+      if (currentRound < config.numberOfRounds) {
+        setTimeout(() => {
+          currentRound++;
+          revealedPicks = 0;
+          initializeDraftBoard();
+
+          const roundTitle = document.getElementById('round-title');
+          if (roundTitle) {
+            roundTitle.textContent = `Round ${currentRound}`;
+          }
+
+          if (manualBtn) manualBtn.disabled = false;
+          if (simulateBtn) simulateBtn.disabled = false;
+        }, 2000);
+      } else {
+        // All rounds complete
+        setTimeout(() => {
+          const saveBtn = document.getElementById('save-lottery-btn');
+          if (saveBtn) {
+            saveBtn.classList.remove('hidden');
+          }
+        }, 1000);
+      }
+    }
+
+    // Save lottery
+    async function saveLottery() {
+      const lottery = {
+        id: `lottery-${config.currentYear}`,
+        year: config.currentYear,
+        date: new Date().toISOString(),
+        picks: allPicks,
+        config: config,
+      };
+
+      try {
+        const response = await fetch('/api/lottery', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(lottery),
+        });
+
+        if (response.ok) {
+          alert('Lottery saved successfully!');
+          window.location.href = '/history';
+        } else {
+          alert('Failed to save lottery');
+        }
+      } catch (error) {
+        alert('Failed to save lottery');
+      }
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      loadConfig();
+
+      document.getElementById('save-order-btn')?.addEventListener('click', saveInitialOrder);
+      document.getElementById('start-lottery-btn')?.addEventListener('click', startLottery);
+      document.getElementById('manual-pick-btn')?.addEventListener('click', manualPick);
+      document.getElementById('simulate-btn')?.addEventListener('click', simulatePicks);
+      document.getElementById('save-lottery-btn')?.addEventListener('click', saveLottery);
+    });
+  </script>
+
+  <style>
+    .card-back,
+    .card-front {
+      backface-visibility: hidden;
+    }
+  </style>
+</Layout>

@@ -1,0 +1,215 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { Database } from '../lib/database';
+
+const lotteries = await Database.getAllLotteries();
+const selectedYear = lotteries.length > 0 ? lotteries[0].year : null;
+---
+
+<Layout title="Draft Lottery History - Dynasty Football">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="mb-8">
+      <h2 class="text-3xl font-bold text-amber-500 mb-2">Draft Lottery History</h2>
+      <p class="text-gray-400">View past draft lottery results</p>
+    </div>
+
+    {
+      lotteries.length === 0 ? (
+        <div class="bg-gray-900 rounded-lg p-12 border border-gray-800 text-center">
+          <p class="text-gray-400 text-lg">No draft lotteries have been completed yet.</p>
+          <a
+            href="/"
+            class="inline-block mt-4 px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-md transition-colors"
+          >
+            Run Your First Lottery
+          </a>
+        </div>
+      ) : (
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <!-- Year Navigation -->
+          <div class="lg:col-span-1">
+            <div class="bg-gray-900 rounded-lg border border-gray-800 p-4">
+              <h3 class="text-lg font-semibold mb-4 text-amber-400">Years</h3>
+              <div class="space-y-2" id="year-list">
+                {lotteries.map((lottery) => (
+                  <button
+                    data-year={lottery.year}
+                    class="year-btn w-full text-left px-4 py-2 rounded-md transition-colors hover:bg-gray-800"
+                  >
+                    <div class="font-medium text-amber-100">{lottery.year}</div>
+                    <div class="text-sm text-stone-50">
+                      {new Date(lottery.date).toLocaleDateString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <!-- Lottery Results -->
+          <div class="lg:col-span-3">
+            <div id="lottery-results" class="bg-gray-900 rounded-lg border border-gray-800 p-6">
+              <div class="mb-6">
+                <h3 class="text-2xl font-bold text-amber-400" id="selected-year">
+                  {selectedYear} Draft Lottery
+                </h3>
+              </div>
+
+              <div id="results-content">
+                <!-- Results will be loaded here -->
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+  </div>
+
+  <script>
+    import type { DraftLottery } from '../types';
+
+    let lotteries: DraftLottery[] = [];
+    let selectedYear: number | null = null;
+
+    // Load all lotteries
+    async function loadLotteries() {
+      try {
+        const response = await fetch('/api/lottery');
+        lotteries = await response.json();
+
+        if (lotteries.length > 0) {
+          selectYear(lotteries[0].year);
+        }
+
+        updateYearButtons();
+      } catch (error) {
+        console.error('Failed to load lotteries:', error);
+      }
+    }
+
+    // Update year button styles
+    function updateYearButtons() {
+      const buttons = document.querySelectorAll('.year-btn');
+      buttons.forEach((btn) => {
+        const year = parseInt(btn.getAttribute('data-year') || '0');
+        if (year === selectedYear) {
+          btn.classList.add('bg-amber-600', 'text-white');
+          btn.classList.remove('hover:bg-gray-800');
+        } else {
+          btn.classList.remove('bg-amber-600', 'text-white');
+          btn.classList.add('hover:bg-gray-800');
+        }
+      });
+    }
+
+    // Select year
+    function selectYear(year: number) {
+      selectedYear = year;
+      updateYearButtons();
+      loadLotteryResults(year);
+
+      const yearTitle = document.getElementById('selected-year');
+      if (yearTitle) {
+        yearTitle.textContent = `${year} Draft Lottery`;
+      }
+    }
+
+    // Load lottery results for a specific year
+    async function loadLotteryResults(year: number) {
+      try {
+        const response = await fetch(`/api/lottery/${year}`);
+        const lottery: DraftLottery = await response.json();
+
+        displayResults(lottery);
+      } catch (error) {
+        console.error('Failed to load lottery results:', error);
+      }
+    }
+
+    // Display results
+    function displayResults(lottery: DraftLottery) {
+      const container = document.getElementById('results-content');
+      if (!container) return;
+
+      container.innerHTML = '';
+
+      // Group picks by round
+      const picksByRound: { [round: number]: typeof lottery.picks } = {};
+      lottery.picks.forEach((pick) => {
+        if (!picksByRound[pick.round]) {
+          picksByRound[pick.round] = [];
+        }
+        picksByRound[pick.round].push(pick);
+      });
+
+      // Display each round
+      Object.keys(picksByRound)
+        .sort((a, b) => parseInt(a) - parseInt(b))
+        .forEach((roundStr) => {
+          const round = parseInt(roundStr);
+          const picks = picksByRound[round];
+
+          const roundDiv = document.createElement('div');
+          roundDiv.className = 'mb-8';
+
+          roundDiv.innerHTML = `
+            <h4 class="text-xl font-semibold mb-4 text-amber-400">Round ${round}</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              ${picks
+                .map((pick) => {
+                  const team = lottery.config.teams.find((t) => t.id === pick.teamId);
+                  return `
+                    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 flex flex-col items-center text-center">
+                      <div class="text-base font-bold text-stone-50 mb-3">Pick ${pick.pickNumber}</div>
+                      ${
+                        team?.logoUrl
+                          ? `<img src="${team.logoUrl}" alt="${team.name}" class="w-32 h-12 object-cover rounded border border-gray-500 mb-3" />`
+                          : `<div class="w-20 h-12 bg-gray-700 rounded border border-gray-600 flex items-center justify-center text-sm font-bold mb-3">${team?.name.substring(0, 2).toUpperCase()}</div>`
+                      }
+                      <div class="mb-3">
+                        <div class="font-light text-xs mb-2">${team?.name}</div>
+                        <div class="inline-block px-3 py-1 bg-gray-700 rounded-full text-xs text-gray-400">Orig. Pos. ${pick.originalPosition}</div>
+                      </div>
+                      <div class="${getMovementColor(pick.movement)}">
+                        ${getMovementText(pick.movement)}
+                      </div>
+                    </div>
+                  `;
+                })
+                .join('')}
+            </div>
+          `;
+
+          container.appendChild(roundDiv);
+        });
+    }
+
+    // Get movement text
+    function getMovementText(movement: number): string {
+      if (movement === 0) return 'STAYED';
+      if (movement < 0)
+        return `<i class="fa-solid fa-arrow-up"></i> ${Math.abs(movement)} ${Math.abs(movement) === 1 ? 'SPOT' : 'SPOTS'}`;
+      return `<i class="fa-solid fa-arrow-down"></i> ${movement} ${movement === 1 ? 'SPOT' : 'SPOTS'}`;
+    }
+
+    // Get movement color
+    function getMovementColor(movement: number): string {
+      if (movement === 0) return 'text-gray-400 text-sm';
+      if (movement < 0) return 'text-green-400 font-semibold text-sm';
+      return 'text-red-400 font-semibold text-sm';
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      loadLotteries();
+
+      // Add click handlers to year buttons
+      document.querySelectorAll('.year-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const year = parseInt(btn.getAttribute('data-year') || '0');
+          selectYear(year);
+        });
+      });
+    });
+  </script>
+</Layout>
